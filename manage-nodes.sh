@@ -17,12 +17,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
-# ──────────────────────────────────────────────
-#  Detect OS for portable sed -i
-# ──────────────────────────────────────────────
-SED_INPLACE=()
+# Detect OS for portable sed
 if [[ "$(uname -s)" == "Darwin" ]]; then
     SED_INPLACE=(-i '')
 else
@@ -33,57 +31,48 @@ fi
 #  yq setup
 # ──────────────────────────────────────────────
 ensure_yq() {
-    # 1) Try system yq (mikefarah version)
+    # 1) Check system yq
     if command -v yq &>/dev/null; then
-        # Verify it's mikefarah/yq (not the python-yq wrapper)
         if yq --version 2>&1 | grep -qi 'mikefarah\|github.com/mikefarah'; then
             YQ_BINARY="yq"
             return
         fi
     fi
 
-    # 2) Try local binary
+    # 2) Check local binary
     if [ -f "$SCRIPT_DIR/yq" ]; then
         if "$SCRIPT_DIR/yq" --version &>/dev/null; then
             YQ_BINARY="$SCRIPT_DIR/yq"
             return
         else
-            echo -e "${YELLOW}Existing yq binary is incompatible, re-downloading...${NC}"
+            echo -e "${YELLOW}Existing yq binary is broken, re-downloading...${NC}"
             rm -f "$SCRIPT_DIR/yq"
         fi
     fi
 
     # 3) Download
-    echo -e "${YELLOW}yq not found. Downloading yq...${NC}"
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-    ARCH=$(uname -m)
-
-    case "$ARCH" in
-        x86_64)  ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
-        arm64)   ARCH="arm64" ;;
+    echo -e "${YELLOW}yq not found. Downloading...${NC}"
+    local os arch
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
         *)
-            echo -e "${RED}Unsupported architecture: $ARCH${NC}"
-            echo -e "${RED}Please install yq manually: https://github.com/mikefarah/yq${NC}"
-            exit 1
-            ;;
+            echo -e "${RED}Unsupported architecture: $arch${NC}"
+            echo -e "${RED}Install yq manually: https://github.com/mikefarah/yq${NC}"
+            exit 1 ;;
     esac
 
-    YQ_URL="https://github.com/mikefarah/yq/releases/latest/download/yq_${OS}_${ARCH}"
-    echo -e "  Downloading from: ${CYAN}$YQ_URL${NC}"
-
-    if ! curl -fsSL "$YQ_URL" -o "$SCRIPT_DIR/yq"; then
-        echo -e "${RED}Failed to download yq. Please install it manually.${NC}"
+    if ! curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_${os}_${arch}" -o "$SCRIPT_DIR/yq"; then
+        echo -e "${RED}Download failed. Install yq manually.${NC}"
         exit 1
     fi
-
     chmod +x "$SCRIPT_DIR/yq"
 
-    # Verify downloaded binary works
     if ! "$SCRIPT_DIR/yq" --version &>/dev/null; then
-        echo -e "${RED}Downloaded yq binary is not compatible with this system.${NC}"
         rm -f "$SCRIPT_DIR/yq"
-        echo -e "${RED}Please install yq manually: https://github.com/mikefarah/yq${NC}"
+        echo -e "${RED}Downloaded binary incompatible. Install yq manually.${NC}"
         exit 1
     fi
 
@@ -98,21 +87,10 @@ create_backup() {
     mkdir -p "$BACKUP_DIR"
     local ts
     ts=$(date +%Y%m%d_%H%M%S)
-
     [ -f "$CONFIG_FILE" ] && cp "$CONFIG_FILE" "$BACKUP_DIR/config.yml.backup_$ts"
     [ -f "$ENV_FILE" ]    && cp "$ENV_FILE"    "$BACKUP_DIR/.env.backup_$ts"
-
-    # Keep only last 20 backup files
-    local count
-    count=$(find "$BACKUP_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
-    if [ "$count" -gt 20 ]; then
-        find "$BACKUP_DIR" -maxdepth 1 -type f -printf '%T+ %p\n' 2>/dev/null \
-            | sort | head -n $(( count - 20 )) | awk '{print $2}' | xargs rm -f 2>/dev/null
-        # macOS fallback (no -printf)
-        if [ $? -ne 0 ]; then
-            ls -t "$BACKUP_DIR"/* 2>/dev/null | tail -n +21 | xargs rm -f 2>/dev/null
-        fi
-    fi
+    # Prune old backups (keep last 20 files)
+    ls -t "$BACKUP_DIR"/* 2>/dev/null | tail -n +21 | xargs rm -f 2>/dev/null || true
 }
 
 pause() {
@@ -122,106 +100,135 @@ pause() {
 
 check_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
-        echo -e "${RED}Error: Config file not found at $CONFIG_FILE${NC}"
-        echo -e "${YELLOW}Create it from the example: cp config.example.yml config.yml${NC}"
+        echo -e "${RED}Config file not found: $CONFIG_FILE${NC}"
+        echo -e "${YELLOW}Run: cp config.example.yml config.yml${NC}"
         return 1
     fi
-    return 0
 }
 
 check_env() {
     if [ ! -f "$ENV_FILE" ]; then
-        echo -e "${RED}Error: .env file not found at $ENV_FILE${NC}"
-        echo -e "${YELLOW}Create it from the example: cp .env.example .env${NC}"
+        echo -e "${RED}.env file not found: $ENV_FILE${NC}"
+        echo -e "${YELLOW}Run: cp .env.example .env${NC}"
         return 1
     fi
-    return 0
 }
 
-# Read domains into a bash array safely
-get_domains() {
+# ──────────────────────────────────────────────
+#  Interactive pickers
+#  ALL UI output goes to >&2 so only the
+#  selected value goes to stdout for capture.
+# ──────────────────────────────────────────────
+pick_domain() {
     local -a domains=()
     while IFS= read -r line; do
-        [ -n "$line" ] && domains+=("$line")
-    done < <($YQ_BINARY -r '.domains[].domain' "$CONFIG_FILE" 2>/dev/null)
-    echo "${domains[@]}"
-}
-
-# Read zones for a domain into stdout (one per line)
-get_zones() {
-    local domain="$1"
-    $YQ_BINARY -r ".domains[] | select(.domain == \"$domain\") | .zones[].name" "$CONFIG_FILE" 2>/dev/null
-}
-
-# Read IPs for a domain+zone into stdout (one per line)
-get_ips() {
-    local domain="$1" zone="$2"
-    $YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[]" "$CONFIG_FILE" 2>/dev/null
-}
-
-select_domain() {
-    local -a domains=()
-    while IFS= read -r line; do
-        [ -n "$line" ] && domains+=("$line")
+        [[ -n "$line" ]] && domains+=("$line")
     done < <($YQ_BINARY -r '.domains[].domain' "$CONFIG_FILE" 2>/dev/null)
 
-    if [ ${#domains[@]} -eq 0 ]; then
-        echo -e "${RED}No domains found in config.${NC}"
+    if [[ ${#domains[@]} -eq 0 ]]; then
+        echo -e "${RED}No domains found in config.${NC}" >&2
         return 1
     fi
 
-    echo "Available Domains:"
-    select SELECTED_DOMAIN in "${domains[@]}"; do
-        if [ -n "$SELECTED_DOMAIN" ]; then
-            echo "$SELECTED_DOMAIN"
+    if [[ ${#domains[@]} -eq 1 ]]; then
+        echo -e "${DIM}Auto-selected domain: ${BOLD}${domains[0]}${NC}" >&2
+        echo "${domains[0]}"
+        return 0
+    fi
+
+    echo -e "${CYAN}Select domain:${NC}" >&2
+    local i
+    for i in "${!domains[@]}"; do
+        echo -e "  ${BOLD}$((i+1)))${NC} ${domains[$i]}" >&2
+    done
+    while true; do
+        read -rp "Domain [1-${#domains[@]}]: " num
+        if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#domains[@]} )); then
+            echo "${domains[$((num-1))]}"
             return 0
         fi
-        echo -e "${RED}Invalid selection, try again.${NC}"
+        echo -e "${RED}Invalid. Enter a number 1-${#domains[@]}.${NC}" >&2
     done
 }
 
-select_zone() {
+pick_zone() {
     local domain="$1"
     local -a zones=()
     while IFS= read -r line; do
-        [ -n "$line" ] && zones+=("$line")
-    done < <(get_zones "$domain")
+        [[ -n "$line" ]] && zones+=("$line")
+    done < <($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\") | .zones[].name" "$CONFIG_FILE" 2>/dev/null)
 
-    if [ ${#zones[@]} -eq 0 ]; then
-        echo -e "${RED}No zones found for $domain.${NC}"
+    if [[ ${#zones[@]} -eq 0 ]]; then
+        echo -e "${RED}No zones found for $domain.${NC}" >&2
         return 1
     fi
 
-    echo "Available Zones in $domain:"
-    select SELECTED_ZONE in "${zones[@]}"; do
-        if [ -n "$SELECTED_ZONE" ]; then
-            echo "$SELECTED_ZONE"
+    if [[ ${#zones[@]} -eq 1 ]]; then
+        echo -e "${DIM}Auto-selected zone: ${BOLD}${zones[0]}${NC}" >&2
+        echo "${zones[0]}"
+        return 0
+    fi
+
+    echo -e "${CYAN}Select zone in ${BOLD}$domain${NC}${CYAN}:${NC}" >&2
+    local i
+    for i in "${!zones[@]}"; do
+        # Show zone IPs inline for context
+        local ips
+        ips=$($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"${zones[$i]}\").ips | join(\", \")" "$CONFIG_FILE" 2>/dev/null)
+        echo -e "  ${BOLD}$((i+1)))${NC} ${zones[$i]}.$domain  ${DIM}[${ips}]${NC}" >&2
+    done
+    while true; do
+        read -rp "Zone [1-${#zones[@]}]: " num
+        if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#zones[@]} )); then
+            echo "${zones[$((num-1))]}"
             return 0
         fi
-        echo -e "${RED}Invalid selection, try again.${NC}"
+        echo -e "${RED}Invalid. Enter a number 1-${#zones[@]}.${NC}" >&2
     done
 }
 
-select_ip() {
+pick_ip() {
     local domain="$1" zone="$2"
     local -a ips=()
     while IFS= read -r line; do
-        [ -n "$line" ] && ips+=("$line")
-    done < <(get_ips "$domain" "$zone")
+        [[ -n "$line" ]] && ips+=("$line")
+    done < <($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[]" "$CONFIG_FILE" 2>/dev/null)
 
-    if [ ${#ips[@]} -eq 0 ]; then
-        echo -e "${RED}No IPs found for $zone.$domain.${NC}"
+    if [[ ${#ips[@]} -eq 0 ]]; then
+        echo -e "${RED}No IPs in $zone.$domain.${NC}" >&2
         return 1
     fi
 
-    echo "Current IPs:"
-    select SELECTED_IP in "${ips[@]}"; do
-        if [ -n "$SELECTED_IP" ]; then
-            echo "$SELECTED_IP"
+    echo -e "${CYAN}Select IP in ${BOLD}$zone.$domain${NC}${CYAN}:${NC}" >&2
+    local i
+    for i in "${!ips[@]}"; do
+        echo -e "  ${BOLD}$((i+1)))${NC} ${ips[$i]}" >&2
+    done
+    while true; do
+        read -rp "IP [1-${#ips[@]}]: " num
+        if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#ips[@]} )); then
+            echo "${ips[$((num-1))]}"
             return 0
         fi
-        echo -e "${RED}Invalid selection, try again.${NC}"
+        echo -e "${RED}Invalid. Enter a number 1-${#ips[@]}.${NC}" >&2
     done
+}
+
+# Show current IPs for a zone (for display)
+show_zone_ips() {
+    local domain="$1" zone="$2"
+    local -a ips=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && ips+=("$line")
+    done < <($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[]" "$CONFIG_FILE" 2>/dev/null)
+
+    if [[ ${#ips[@]} -eq 0 ]]; then
+        echo -e "  ${DIM}(no IPs)${NC}"
+    else
+        for ip in "${ips[@]}"; do
+            echo -e "  ${GREEN}•${NC} $ip"
+        done
+    fi
 }
 
 # ──────────────────────────────────────────────
@@ -239,7 +246,7 @@ show_status() {
     for (( d=0; d<domain_count; d++ )); do
         local domain
         domain=$($YQ_BINARY -r ".domains[$d].domain" "$CONFIG_FILE")
-        echo -e "\n${BOLD}${CYAN}  📦 Domain: $domain${NC}"
+        echo -e "\n  ${BOLD}${CYAN}📦 $domain${NC}"
 
         local zone_count
         zone_count=$($YQ_BINARY ".domains[$d].zones | length" "$CONFIG_FILE")
@@ -250,88 +257,178 @@ show_status() {
             ttl=$($YQ_BINARY -r ".domains[$d].zones[$z].ttl" "$CONFIG_FILE")
             proxied=$($YQ_BINARY -r ".domains[$d].zones[$z].proxied" "$CONFIG_FILE")
 
-            echo -e "    ${GREEN}🌐 Zone: ${BOLD}$name.$domain${NC}  ${YELLOW}(TTL: $ttl, Proxied: $proxied)${NC}"
+            echo -e "    ${GREEN}🌐 $name.$domain${NC}  ${DIM}TTL=$ttl  Proxied=$proxied${NC}"
 
             local ip_count
             ip_count=$($YQ_BINARY ".domains[$d].zones[$z].ips | length" "$CONFIG_FILE")
-
             for (( i=0; i<ip_count; i++ )); do
                 local ip
                 ip=$($YQ_BINARY -r ".domains[$d].zones[$z].ips[$i]" "$CONFIG_FILE")
-                echo -e "       └─ $ip"
+                echo "       └─ $ip"
             done
         done
     done
-
-    echo -e "\n${BOLD}${BLUE}═══════════════════════════════════${NC}"
-
-    if check_env 2>/dev/null; then
-        echo -e "\n${BOLD}${CYAN}  ⚙️  Server Config (.env):${NC}"
-        while IFS='=' read -r key value; do
-            # Skip comments and empty lines
-            [[ "$key" =~ ^#.*$ ]] && continue
-            [[ -z "$key" ]] && continue
-            # Mask sensitive values
-            if [[ "$key" =~ (KEY|TOKEN|SECRET) ]]; then
-                echo -e "    $key = ${YELLOW}****${NC}"
-            else
-                echo -e "    $key = ${GREEN}$value${NC}"
-            fi
-        done < "$ENV_FILE"
-    fi
+    echo ""
 }
 
 # ──────────────────────────────────────────────
-#  2. Add IP
+#  2. Add IP  (supports adding multiple at once)
 # ──────────────────────────────────────────────
 add_ip() {
     echo -e "${BOLD}${BLUE}=== Add Node IP ===${NC}"
     check_config || return
 
-    local domain zone ip_addr
-    domain=$(select_domain) || return
-    zone=$(select_zone "$domain") || return
+    # Pick domain & zone
+    local domain zone
+    domain=$(pick_domain) || return
+    zone=$(pick_zone "$domain") || return
 
-    read -rp "Enter new IP address: " ip_addr
-    if [[ -z "$ip_addr" ]]; then
-        echo -e "${RED}IP address cannot be empty.${NC}"
+    # Show current IPs
+    echo -e "\n${CYAN}Current IPs in ${BOLD}$zone.$domain${NC}${CYAN}:${NC}"
+    show_zone_ips "$domain" "$zone"
+
+    echo -e "\n${YELLOW}Enter IP address(es) to add.${NC}"
+    echo -e "${DIM}You can enter multiple IPs separated by spaces, or one per line.${NC}"
+    echo -e "${DIM}Type 'done' or press Enter on empty line when finished.${NC}"
+
+    local -a new_ips=()
+    while true; do
+        read -rp "> " input
+        # Empty line or "done" = finished
+        [[ -z "$input" || "$input" == "done" ]] && break
+
+        # Split by spaces/commas
+        for ip in $input; do
+            ip=$(echo "$ip" | tr -d ',' | xargs)
+            [[ -z "$ip" ]] && continue
+
+            # Basic IP format check
+            if ! [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo -e "${RED}  ✗ '$ip' is not a valid IPv4 address, skipped.${NC}"
+                continue
+            fi
+
+            # Duplicate check against existing
+            local existing
+            existing=$($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[]" "$CONFIG_FILE" 2>/dev/null)
+            if echo "$existing" | grep -qxF "$ip"; then
+                echo -e "${YELLOW}  ⚠ $ip already exists, skipped.${NC}"
+                continue
+            fi
+
+            # Duplicate check against what we're about to add
+            local already_queued=false
+            for queued in "${new_ips[@]}"; do
+                [[ "$queued" == "$ip" ]] && already_queued=true && break
+            done
+            if $already_queued; then
+                echo -e "${YELLOW}  ⚠ $ip already queued, skipped.${NC}"
+                continue
+            fi
+
+            new_ips+=("$ip")
+            echo -e "${GREEN}  ✓ $ip queued${NC}"
+        done
+    done
+
+    if [[ ${#new_ips[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No IPs to add.${NC}"
         return
     fi
 
-    # Check for duplicate
-    local existing
-    existing=$(get_ips "$domain" "$zone")
-    if echo "$existing" | grep -qxF "$ip_addr"; then
-        echo -e "${RED}IP $ip_addr already exists in $zone.$domain${NC}"
-        return
-    fi
+    # Confirm
+    echo -e "\n${CYAN}Will add ${BOLD}${#new_ips[@]}${NC}${CYAN} IP(s) to ${BOLD}$zone.$domain${NC}${CYAN}:${NC}"
+    for ip in "${new_ips[@]}"; do
+        echo -e "  ${GREEN}+ $ip${NC}"
+    done
+    read -rp "Proceed? (Y/n): " confirm
+    [[ "$confirm" == "n" || "$confirm" == "N" ]] && { echo "Cancelled."; return; }
 
     create_backup
-    $YQ_BINARY -i "(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips) += [\"$ip_addr\"]" "$CONFIG_FILE"
-    echo -e "${GREEN}✅ Added $ip_addr to $zone.$domain${NC}"
+
+    # Add each IP
+    for ip in "${new_ips[@]}"; do
+        $YQ_BINARY -i "(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips) += [\"$ip\"]" "$CONFIG_FILE"
+    done
+
+    echo -e "\n${GREEN}✅ Added ${#new_ips[@]} IP(s) to $zone.$domain${NC}"
+    echo -e "\n${CYAN}Updated IPs:${NC}"
+    show_zone_ips "$domain" "$zone"
 }
 
 # ──────────────────────────────────────────────
-#  3. Remove IP
+#  3. Remove IP  (supports removing multiple)
 # ──────────────────────────────────────────────
 remove_ip() {
     echo -e "${BOLD}${BLUE}=== Remove Node IP ===${NC}"
     check_config || return
 
-    local domain zone ip_to_remove
-    domain=$(select_domain) || return
-    zone=$(select_zone "$domain") || return
-    ip_to_remove=$(select_ip "$domain" "$zone") || return
+    local domain zone
+    domain=$(pick_domain) || return
+    zone=$(pick_zone "$domain") || return
 
-    read -rp "Remove $ip_to_remove from $zone.$domain? (y/N): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo "Cancelled."
+    # Read all IPs into array
+    local -a ips=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && ips+=("$line")
+    done < <($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[]" "$CONFIG_FILE" 2>/dev/null)
+
+    if [[ ${#ips[@]} -eq 0 ]]; then
+        echo -e "${RED}No IPs in $zone.$domain.${NC}"
         return
     fi
 
+    echo -e "\n${CYAN}Current IPs in ${BOLD}$zone.$domain${NC}${CYAN}:${NC}"
+    local i
+    for i in "${!ips[@]}"; do
+        echo -e "  ${BOLD}$((i+1)))${NC} ${ips[$i]}"
+    done
+
+    echo -e "\n${YELLOW}Enter the number(s) of IPs to remove.${NC}"
+    echo -e "${DIM}Separate multiple with spaces (e.g. 1 3 4), or 'all' to remove all.${NC}"
+    read -rp "> " selection
+
+    local -a to_remove=()
+
+    if [[ "$selection" == "all" ]]; then
+        to_remove=("${ips[@]}")
+    else
+        for num in $selection; do
+            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#ips[@]} )); then
+                to_remove+=("${ips[$((num-1))]}")
+            else
+                echo -e "${RED}  ✗ Invalid number: $num (skipped)${NC}"
+            fi
+        done
+    fi
+
+    if [[ ${#to_remove[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}Nothing selected.${NC}"
+        return
+    fi
+
+    # Warn if removing all
+    local remaining=$(( ${#ips[@]} - ${#to_remove[@]} ))
+    if [[ $remaining -eq 0 ]]; then
+        echo -e "${RED}⚠  WARNING: This will remove ALL IPs from $zone.$domain!${NC}"
+    fi
+
+    echo -e "\n${CYAN}Will remove ${BOLD}${#to_remove[@]}${NC}${CYAN} IP(s):${NC}"
+    for ip in "${to_remove[@]}"; do
+        echo -e "  ${RED}- $ip${NC}"
+    done
+    read -rp "Proceed? (y/N): " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Cancelled."; return; }
+
     create_backup
-    $YQ_BINARY -i "del(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[] | select(. == \"$ip_to_remove\"))" "$CONFIG_FILE"
-    echo -e "${GREEN}✅ Removed $ip_to_remove from $zone.$domain${NC}"
+
+    for ip in "${to_remove[@]}"; do
+        $YQ_BINARY -i "del(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[] | select(. == \"$ip\"))" "$CONFIG_FILE"
+    done
+
+    echo -e "\n${GREEN}✅ Removed ${#to_remove[@]} IP(s) from $zone.$domain${NC}"
+    echo -e "\n${CYAN}Remaining IPs:${NC}"
+    show_zone_ips "$domain" "$zone"
 }
 
 # ──────────────────────────────────────────────
@@ -342,19 +439,34 @@ replace_ip() {
     check_config || return
 
     local domain zone old_ip new_ip
-    domain=$(select_domain) || return
-    zone=$(select_zone "$domain") || return
-    old_ip=$(select_ip "$domain" "$zone") || return
+    domain=$(pick_domain) || return
+    zone=$(pick_zone "$domain") || return
 
-    read -rp "Enter NEW IP address (replacing $old_ip): " new_ip
+    echo -e "\n${CYAN}Current IPs in ${BOLD}$zone.$domain${NC}${CYAN}:${NC}"
+    show_zone_ips "$domain" "$zone"
+
+    old_ip=$(pick_ip "$domain" "$zone") || return
+
+    read -rp "New IP to replace $old_ip: " new_ip
     if [[ -z "$new_ip" ]]; then
-        echo -e "${RED}IP address cannot be empty.${NC}"
+        echo -e "${RED}IP cannot be empty.${NC}"
+        return
+    fi
+    if ! [[ "$new_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${RED}'$new_ip' is not a valid IPv4 address.${NC}"
         return
     fi
 
+    echo -e "\n${CYAN}Replace: ${RED}$old_ip${NC} → ${GREEN}$new_ip${NC}"
+    read -rp "Proceed? (Y/n): " confirm
+    [[ "$confirm" == "n" || "$confirm" == "N" ]] && { echo "Cancelled."; return; }
+
     create_backup
     $YQ_BINARY -i "(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\").ips[] | select(. == \"$old_ip\")) = \"$new_ip\"" "$CONFIG_FILE"
-    echo -e "${GREEN}✅ Replaced $old_ip → $new_ip in $zone.$domain${NC}"
+
+    echo -e "\n${GREEN}✅ Replaced $old_ip → $new_ip in $zone.$domain${NC}"
+    echo -e "\n${CYAN}Updated IPs:${NC}"
+    show_zone_ips "$domain" "$zone"
 }
 
 # ──────────────────────────────────────────────
@@ -364,47 +476,79 @@ add_zone() {
     echo -e "${BOLD}${BLUE}=== Add New Zone ===${NC}"
     check_config || return
 
-    local domain zone_name ttl proxied initial_ip
-    domain=$(select_domain) || return
+    local domain zone_name ttl proxied
+    domain=$(pick_domain) || return
 
-    read -rp "Enter new zone name (subdomain): " zone_name
+    read -rp "New zone name (subdomain): " zone_name
     if [[ -z "$zone_name" ]]; then
         echo -e "${RED}Zone name cannot be empty.${NC}"
         return
     fi
 
-    # Check if zone already exists
-    local existing_zone
-    existing_zone=$(get_zones "$domain" | grep -xF "$zone_name")
-    if [ -n "$existing_zone" ]; then
+    # Check duplicate
+    local existing
+    existing=$($YQ_BINARY -r ".domains[] | select(.domain == \"$domain\") | .zones[].name" "$CONFIG_FILE" 2>/dev/null)
+    if echo "$existing" | grep -qxF "$zone_name"; then
         echo -e "${RED}Zone '$zone_name' already exists in $domain.${NC}"
         return
     fi
 
-    read -rp "Enter TTL [60]: " ttl
+    read -rp "TTL [60]: " ttl
     ttl=${ttl:-60}
-    read -rp "Proxied? (true/false) [false]: " proxied
+    read -rp "Proxied? true/false [false]: " proxied
     proxied=${proxied:-false}
-    read -rp "Enter initial IP address: " initial_ip
 
-    if [[ -z "$initial_ip" ]]; then
-        echo -e "${RED}Initial IP is required.${NC}"
+    echo -e "\n${YELLOW}Enter IP address(es) for this zone.${NC}"
+    echo -e "${DIM}Separate multiple with spaces, or one per line. Empty line to finish.${NC}"
+
+    local -a zone_ips=()
+    while true; do
+        read -rp "> " input
+        [[ -z "$input" || "$input" == "done" ]] && break
+        for ip in $input; do
+            ip=$(echo "$ip" | tr -d ',' | xargs)
+            [[ -z "$ip" ]] && continue
+            if ! [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo -e "${RED}  ✗ '$ip' invalid, skipped.${NC}"
+                continue
+            fi
+            zone_ips+=("$ip")
+            echo -e "${GREEN}  ✓ $ip${NC}"
+        done
+    done
+
+    if [[ ${#zone_ips[@]} -eq 0 ]]; then
+        echo -e "${RED}At least one IP is required.${NC}"
         return
     fi
 
-    create_backup
+    # Build the IPs array as a yq expression
+    local ips_json="["
+    for i in "${!zone_ips[@]}"; do
+        [[ $i -gt 0 ]] && ips_json+=","
+        ips_json+="\"${zone_ips[$i]}\""
+    done
+    ips_json+="]"
 
-    # Use yq to build and append the new zone object properly
+    echo -e "\n${CYAN}Will create zone:${NC}"
+    echo -e "  ${BOLD}$zone_name.$domain${NC}  TTL=$ttl  Proxied=$proxied"
+    for ip in "${zone_ips[@]}"; do
+        echo -e "  ${GREEN}+ $ip${NC}"
+    done
+    read -rp "Proceed? (Y/n): " confirm
+    [[ "$confirm" == "n" || "$confirm" == "N" ]] && { echo "Cancelled."; return; }
+
+    create_backup
     $YQ_BINARY -i "
         (.domains[] | select(.domain == \"$domain\").zones) += [{
             \"name\": \"$zone_name\",
             \"ttl\": $ttl,
             \"proxied\": $proxied,
-            \"ips\": [\"$initial_ip\"]
+            \"ips\": $ips_json
         }]
     " "$CONFIG_FILE"
 
-    echo -e "${GREEN}✅ Added zone $zone_name.$domain with IP $initial_ip${NC}"
+    echo -e "\n${GREEN}✅ Created zone $zone_name.$domain${NC}"
 }
 
 # ──────────────────────────────────────────────
@@ -415,19 +559,17 @@ remove_zone() {
     check_config || return
 
     local domain zone
-    domain=$(select_domain) || return
-    zone=$(select_zone "$domain") || return
+    domain=$(pick_domain) || return
+    zone=$(pick_zone "$domain") || return
 
-    echo -e "${RED}WARNING: This will remove zone '$zone' and ALL its IPs from $domain.${NC}"
-    read -rp "Are you sure? (y/N): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo "Cancelled."
-        return
-    fi
+    echo -e "\n${RED}⚠  This will remove zone '$zone' and ALL its IPs:${NC}"
+    show_zone_ips "$domain" "$zone"
+    read -rp "Type 'yes' to confirm: " confirm
+    [[ "$confirm" != "yes" ]] && { echo "Cancelled."; return; }
 
     create_backup
     $YQ_BINARY -i "del(.domains[] | select(.domain == \"$domain\").zones[] | select(.name == \"$zone\"))" "$CONFIG_FILE"
-    echo -e "${GREEN}✅ Removed zone $zone from $domain${NC}"
+    echo -e "\n${GREEN}✅ Removed zone $zone from $domain${NC}"
 }
 
 # ──────────────────────────────────────────────
@@ -437,11 +579,10 @@ edit_env() {
     echo -e "${BOLD}${BLUE}=== Edit Server Config (.env) ===${NC}"
     check_env || return
 
-    # Show current values (masked)
+    # Show current
     echo -e "${CYAN}Current values:${NC}"
     while IFS='=' read -r key value; do
-        [[ "$key" =~ ^#.*$ ]] && continue
-        [[ -z "$key" ]] && continue
+        [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
         if [[ "$key" =~ (KEY|TOKEN|SECRET) ]]; then
             echo -e "  $key = ${YELLOW}****${NC}"
         else
@@ -452,35 +593,38 @@ edit_env() {
 
     local options=("REMNAWAVE_API_URL" "REMNAWAVE_API_KEY" "CLOUDFLARE_API_TOKEN" "TELEGRAM_BOT_TOKEN" "TELEGRAM_CHAT_ID" "TELEGRAM_TOPIC_ID" "TIMEZONE" "TIME_FORMAT" "Back")
 
-    echo "Select variable to change:"
-    select opt in "${options[@]}"; do
-        if [ "$opt" = "Back" ]; then
-            return
-        fi
-        if [ -n "$opt" ]; then
-            local current
-            current=$(grep "^${opt}=" "$ENV_FILE" | cut -d'=' -f2-)
-            echo -e "  Current: ${YELLOW}${current:-<not set>}${NC}"
-            read -rp "  New value: " new_val
-
-            if [ -z "$new_val" ]; then
-                echo -e "${RED}Value cannot be empty.${NC}"
-                return
-            fi
-
-            create_backup
-
-            if grep -q "^${opt}=" "$ENV_FILE"; then
-                sed "${SED_INPLACE[@]}" "s|^${opt}=.*|${opt}=${new_val}|" "$ENV_FILE"
-            else
-                echo "${opt}=${new_val}" >> "$ENV_FILE"
-            fi
-
-            echo -e "${GREEN}✅ Updated $opt${NC}"
-            return
-        fi
-        echo -e "${RED}Invalid selection.${NC}"
+    echo -e "${CYAN}Select variable to change:${NC}"
+    local i
+    for i in "${!options[@]}"; do
+        echo -e "  ${BOLD}$((i+1)))${NC} ${options[$i]}"
     done
+    read -rp "Choice [1-${#options[@]}]: " num
+
+    if ! [[ "$num" =~ ^[0-9]+$ ]] || (( num < 1 || num > ${#options[@]} )); then
+        echo -e "${RED}Invalid.${NC}"
+        return
+    fi
+
+    local opt="${options[$((num-1))]}"
+    [[ "$opt" == "Back" ]] && return
+
+    local current
+    current=$(grep "^${opt}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2-)
+    echo -e "  Current: ${YELLOW}${current:-<not set>}${NC}"
+    read -rp "  New value: " new_val
+
+    if [[ -z "$new_val" ]]; then
+        echo -e "${RED}Value cannot be empty.${NC}"
+        return
+    fi
+
+    create_backup
+    if grep -q "^${opt}=" "$ENV_FILE"; then
+        sed "${SED_INPLACE[@]}" "s|^${opt}=.*|${opt}=${new_val}|" "$ENV_FILE"
+    else
+        echo "${opt}=${new_val}" >> "$ENV_FILE"
+    fi
+    echo -e "${GREEN}✅ Updated $opt${NC}"
 }
 
 # ──────────────────────────────────────────────
@@ -488,17 +632,15 @@ edit_env() {
 # ──────────────────────────────────────────────
 restart_service() {
     echo -e "${BOLD}${BLUE}=== Restart Service ===${NC}"
-
     if ! command -v docker &>/dev/null; then
-        echo -e "${RED}Docker is not installed or not in PATH.${NC}"
+        echo -e "${RED}Docker not found.${NC}"
         return
     fi
-
-    echo -e "${YELLOW}Restarting docker compose service...${NC}"
+    echo -e "${YELLOW}Restarting...${NC}"
     if docker compose -f "$SCRIPT_DIR/docker-compose.yml" restart; then
-        echo -e "${GREEN}✅ Service restarted successfully.${NC}"
+        echo -e "${GREEN}✅ Service restarted.${NC}"
     else
-        echo -e "${RED}Failed to restart. Check docker compose logs.${NC}"
+        echo -e "${RED}Failed. Check docker compose logs.${NC}"
     fi
 }
 
@@ -510,7 +652,6 @@ backup_config() {
     create_backup
     echo -e "${GREEN}✅ Backup created in $BACKUP_DIR/${NC}"
     echo ""
-    echo "Recent backups:"
     ls -lt "$BACKUP_DIR"/ 2>/dev/null | head -10
 }
 
@@ -519,55 +660,52 @@ backup_config() {
 # ──────────────────────────────────────────────
 restore_backup() {
     echo -e "${BOLD}${BLUE}=== Restore Backup ===${NC}"
-
     if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
-        echo -e "${RED}No backups found in $BACKUP_DIR/${NC}"
+        echo -e "${RED}No backups found.${NC}"
         return
     fi
 
     # Config backups
-    local -a config_backups=()
+    local -a cfg_backups=()
     while IFS= read -r f; do
-        [ -n "$f" ] && config_backups+=("$f")
+        [[ -n "$f" ]] && cfg_backups+=("$f")
     done < <(ls -t "$BACKUP_DIR" 2>/dev/null | grep "config.yml")
 
-    if [ ${#config_backups[@]} -gt 0 ]; then
+    if [[ ${#cfg_backups[@]} -gt 0 ]]; then
         echo -e "\n${CYAN}Config backups:${NC}"
-        select backup_file in "${config_backups[@]}" "Skip"; do
-            if [ "$backup_file" = "Skip" ]; then
-                break
-            fi
-            if [ -n "$backup_file" ]; then
-                cp "$BACKUP_DIR/$backup_file" "$CONFIG_FILE"
-                echo -e "${GREEN}✅ Restored config.yml from $backup_file${NC}"
-                break
-            fi
+        for i in "${!cfg_backups[@]}"; do
+            echo -e "  ${BOLD}$((i+1)))${NC} ${cfg_backups[$i]}"
         done
+        echo -e "  ${BOLD}$((${#cfg_backups[@]}+1)))${NC} Skip"
+        read -rp "Choice: " num
+        if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#cfg_backups[@]} )); then
+            cp "$BACKUP_DIR/${cfg_backups[$((num-1))]}" "$CONFIG_FILE"
+            echo -e "${GREEN}✅ Restored config.yml${NC}"
+        fi
     fi
 
-    # Env backups
+    # .env backups
     local -a env_backups=()
     while IFS= read -r f; do
-        [ -n "$f" ] && env_backups+=("$f")
+        [[ -n "$f" ]] && env_backups+=("$f")
     done < <(ls -t "$BACKUP_DIR" 2>/dev/null | grep ".env")
 
-    if [ ${#env_backups[@]} -gt 0 ]; then
+    if [[ ${#env_backups[@]} -gt 0 ]]; then
         echo -e "\n${CYAN}.env backups:${NC}"
-        select env_backup in "${env_backups[@]}" "Skip"; do
-            if [ "$env_backup" = "Skip" ]; then
-                break
-            fi
-            if [ -n "$env_backup" ]; then
-                cp "$BACKUP_DIR/$env_backup" "$ENV_FILE"
-                echo -e "${GREEN}✅ Restored .env from $env_backup${NC}"
-                break
-            fi
+        for i in "${!env_backups[@]}"; do
+            echo -e "  ${BOLD}$((i+1)))${NC} ${env_backups[$i]}"
         done
+        echo -e "  ${BOLD}$((${#env_backups[@]}+1)))${NC} Skip"
+        read -rp "Choice: " num
+        if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#env_backups[@]} )); then
+            cp "$BACKUP_DIR/${env_backups[$((num-1))]}" "$ENV_FILE"
+            echo -e "${GREEN}✅ Restored .env${NC}"
+        fi
     fi
 }
 
 # ──────────────────────────────────────────────
-#  Main Menu
+#  Main
 # ──────────────────────────────────────────────
 ensure_yq
 
