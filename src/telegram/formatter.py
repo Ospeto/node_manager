@@ -3,7 +3,7 @@ from typing import Optional
 
 from fluent.runtime import FluentLocalization, FluentResourceLoader
 
-from .events import NodeStateChange, NodeStats, DNSChange, DNSError, CriticalState, HealthCheckError
+from .events import NodeStateChange, NodeStats, DNSChange, DNSError, CriticalState, HealthCheckError, CapacityChange
 from ..utils.logger import get_logger
 
 
@@ -83,3 +83,16 @@ class MessageFormatter:
 
     def format_service_stopped(self) -> str:
         return self._l10n.format_value("service-stopped")
+
+    def format_capacity_change(self, change: CapacityChange) -> str:
+        msg_id = "node-throttled" if change.action == "throttled" else "node-restored"
+        return self._l10n.format_value(
+            msg_id,
+            {
+                "name": change.node_name,
+                "address": change.node_address,
+                "users": change.users_online,
+                "threshold": change.threshold,
+                "domain": f"{change.zone_name}.{change.domain}",
+            },
+        )

@@ -22,6 +22,12 @@ domains:
           - 13.14.15.16
           - 17.18.19.20
 
+load-balancing:
+  enabled: false
+  max-users-per-node: 50       # Remove DNS record when node exceeds this user count
+  recover-users-per-node: 30   # Re-add DNS record when node drops below this count
+  min-active-nodes: 1          # Always keep at least N nodes active per zone
+
 logging:
   level: INFO # DEBUG, INFO, WARNING, ERROR, CRITICAL
 

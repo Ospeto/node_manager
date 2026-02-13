@@ -38,3 +38,16 @@ all-nodes-down = <b>🔴 CRITICAL: All Nodes Down</b>
     Affected: { $nodes }
 
     DNS records have been cleared. Immediate attention required.
+
+# Capacity load balancing
+node-throttled = <b>⚡ Node Throttled</b>
+    { $name } ({ $address }) removed from { $domain }
+    Users: { $users } (threshold: { $threshold })
+
+    DNS record removed to reduce load.
+
+node-restored = <b>✅ Node Restored</b>
+    { $name } ({ $address }) re-added to { $domain }
+    Users: { $users } (threshold: { $threshold })
+
+    DNS record restored, accepting traffic again.

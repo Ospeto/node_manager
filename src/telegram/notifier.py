@@ -6,7 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 
-from .events import NodeStateChange, DNSChange, DNSError, CriticalState, HealthCheckError
+from .events import NodeStateChange, DNSChange, DNSError, CriticalState, HealthCheckError, CapacityChange
 from .formatter import MessageFormatter
 from ..utils.logger import get_logger
 
@@ -174,4 +174,10 @@ class TelegramNotifier:
         if not self.enabled:
             return
         message = self._formatter.format_service_stopped()
+        self._enqueue(message)
+
+    def notify_capacity_change(self, change: CapacityChange) -> None:
+        if not self.enabled:
+            return
+        message = self._formatter.format_capacity_change(change)
         self._enqueue(message)

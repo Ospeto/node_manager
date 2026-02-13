@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, Optional, Set
+from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
 from .config import Config
 from .remnawave import NodeMonitor
@@ -27,6 +27,7 @@ class MonitoringService:
         self._zone_id_cache: Dict[str, str] = {}
         self._previous_node_states: Dict[str, bool] = {}
         self._previous_all_down: bool = False
+        self._overloaded_ips: Set[str] = set()  # IPs removed due to capacity
 
     async def initialize_and_print_zones(self) -> None:
         self.logger.info("Initializing zones")
@@ -91,7 +92,14 @@ class MonitoringService:
             self._check_node_transitions(configured_nodes)
             self._check_critical_state(configured_nodes, unhealthy_nodes)
 
-            await self._sync_all_zones(healthy_addresses)
+            # Build user count map for capacity-based load balancing
+            users_by_ip: Dict[str, int] = {}
+            node_by_ip: Dict[str, object] = {}
+            for node in configured_nodes:
+                users_by_ip[node.address] = node.users_online
+                node_by_ip[node.address] = node
+
+            await self._sync_all_zones(healthy_addresses, users_by_ip, node_by_ip)
 
             self.logger.info("Health check cycle completed")
 
@@ -109,24 +117,158 @@ class MonitoringService:
             configured_ips.update(zone["ips"])
         return configured_ips
 
-    async def _sync_all_zones(self, healthy_addresses: Set[str]) -> None:
+    async def _sync_all_zones(
+        self,
+        healthy_addresses: Set[str],
+        users_by_ip: Dict[str, int] = None,
+        node_by_ip: Dict[str, object] = None,
+    ) -> None:
+        if users_by_ip is None:
+            users_by_ip = {}
+        if node_by_ip is None:
+            node_by_ip = {}
+
         for zone in self.config.get_all_zones():
             domain = zone["domain"]
+            zone_name = zone["name"]
+            configured_ips = zone["ips"]
 
             zone_id = await self._get_zone_id(domain)
             if not zone_id:
                 self.logger.warning(f"Could not find zone_id for domain {domain}, skipping")
                 continue
 
+            # Apply capacity-based filtering if enabled
+            effective_healthy = self._apply_capacity_filtering(
+                zone_name=zone_name,
+                domain=domain,
+                configured_ips=configured_ips,
+                healthy_addresses=healthy_addresses,
+                users_by_ip=users_by_ip,
+                node_by_ip=node_by_ip,
+            )
+
             await self.dns_manager.sync_dns_records(
                 zone_id=zone_id,
-                zone_name=zone["name"],
+                zone_name=zone_name,
                 domain=domain,
-                configured_ips=zone["ips"],
-                healthy_ips=healthy_addresses,
+                configured_ips=configured_ips,
+                healthy_ips=effective_healthy,
                 ttl=zone["ttl"],
                 proxied=zone["proxied"],
             )
+
+    def _apply_capacity_filtering(
+        self,
+        zone_name: str,
+        domain: str,
+        configured_ips: List[str],
+        healthy_addresses: Set[str],
+        users_by_ip: Dict[str, int],
+        node_by_ip: Dict[str, object],
+    ) -> Set[str]:
+        """Filter healthy IPs based on capacity thresholds.
+
+        Uses hysteresis: remove at max_users, re-add at recover_users.
+        Enforces min_active_nodes per zone.
+        """
+        if not self.config.lb_enabled:
+            return healthy_addresses
+
+        max_users = self.config.lb_max_users
+        recover_users = self.config.lb_recover_users
+        min_active = self.config.lb_min_active_nodes
+        full_domain = f"{zone_name}.{domain}"
+
+        # Only consider IPs that belong to this zone AND are healthy
+        zone_healthy_ips = [ip for ip in configured_ips if ip in healthy_addresses]
+        effective = set(healthy_addresses)  # Start with all healthy
+
+        # Log capacity info for this zone
+        capacity_info = []
+        for ip in zone_healthy_ips:
+            users = users_by_ip.get(ip, 0)
+            if ip in self._overloaded_ips:
+                capacity_info.append(f"{ip} ({users} users ⚡)")
+            else:
+                capacity_info.append(f"{ip} ({users} users ✓)")
+        if capacity_info:
+            self.logger.info(f"{full_domain}: capacity: {', '.join(capacity_info)}")
+
+        # Phase 1: Check for nodes that should be THROTTLED (over max_users)
+        for ip in zone_healthy_ips:
+            users = users_by_ip.get(ip, 0)
+            if users > max_users and ip not in self._overloaded_ips:
+                # Count how many zone nodes would remain active
+                active_count = sum(
+                    1 for zip_ip in zone_healthy_ips
+                    if zip_ip in effective and zip_ip not in self._overloaded_ips
+                )
+                if active_count <= min_active:
+                    self.logger.warning(
+                        f"{full_domain}: {ip} overloaded ({users} users) but keeping active "
+                        f"(min-active-nodes={min_active})"
+                    )
+                    continue
+
+                self._overloaded_ips.add(ip)
+                effective.discard(ip)
+                self.logger.info(
+                    f"{full_domain}: throttled {ip} ({users} users > {max_users} max)"
+                )
+
+                # Send Telegram notification
+                node = node_by_ip.get(ip)
+                if self.notifier and node:
+                    from .telegram import CapacityChange
+
+                    self.notifier.notify_capacity_change(
+                        CapacityChange(
+                            node_name=getattr(node, "name", ip),
+                            node_address=ip,
+                            users_online=users,
+                            threshold=max_users,
+                            action="throttled",
+                            zone_name=zone_name,
+                            domain=domain,
+                        )
+                    )
+
+        # Phase 2: Check for nodes that should be RESTORED (under recover_users)
+        for ip in list(self._overloaded_ips):
+            if ip not in configured_ips:
+                continue  # Not in this zone
+            if ip not in healthy_addresses:
+                continue  # Node went unhealthy, let normal logic handle it
+
+            users = users_by_ip.get(ip, 0)
+            if users < recover_users:
+                self._overloaded_ips.discard(ip)
+                effective.add(ip)
+                self.logger.info(
+                    f"{full_domain}: restored {ip} ({users} users < {recover_users} recover)"
+                )
+
+                node = node_by_ip.get(ip)
+                if self.notifier and node:
+                    from .telegram import CapacityChange
+
+                    self.notifier.notify_capacity_change(
+                        CapacityChange(
+                            node_name=getattr(node, "name", ip),
+                            node_address=ip,
+                            users_online=users,
+                            threshold=recover_users,
+                            action="restored",
+                            zone_name=zone_name,
+                            domain=domain,
+                        )
+                    )
+            else:
+                # Still overloaded, keep removed
+                effective.discard(ip)
+
+        return effective
 
     async def _get_zone_id(self, domain: str) -> Optional[str]:
         if domain in self._zone_id_cache:

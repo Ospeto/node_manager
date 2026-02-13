@@ -131,6 +131,22 @@ class Config:
     def telegram_notify_critical(self) -> bool:
         return self.get("telegram.notify.critical", True)
 
+    @property
+    def lb_enabled(self) -> bool:
+        return self.get("load-balancing.enabled", False)
+
+    @property
+    def lb_max_users(self) -> int:
+        return self.get("load-balancing.max-users-per-node", 50)
+
+    @property
+    def lb_recover_users(self) -> int:
+        return self.get("load-balancing.recover-users-per-node", 30)
+
+    @property
+    def lb_min_active_nodes(self) -> int:
+        return self.get("load-balancing.min-active-nodes", 1)
+
     def get_all_zones(self) -> list:
         zones = []
         for domain_config in self.domains:

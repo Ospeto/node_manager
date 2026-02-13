@@ -45,3 +45,14 @@ class CriticalState:
 @dataclass
 class HealthCheckError:
     error_message: str
+
+
+@dataclass
+class CapacityChange:
+    node_name: str
+    node_address: str
+    users_online: int
+    threshold: int
+    action: str  # "throttled" or "restored"
+    zone_name: str
+    domain: str

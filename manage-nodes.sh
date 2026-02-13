@@ -705,6 +705,82 @@ restore_backup() {
 }
 
 # ──────────────────────────────────────────────
+#  11. Load Balancing Settings
+# ──────────────────────────────────────────────
+load_balancing() {
+    echo -e "${BOLD}${BLUE}=== Load Balancing Settings ===${NC}"
+    check_config || return
+
+    # Read current state
+    local lb_enabled
+    lb_enabled=$($YQ_BINARY -r '.load-balancing.enabled // false' "$CONFIG_FILE" 2>/dev/null)
+
+    if [[ "$lb_enabled" == "true" ]]; then
+        echo -e "  Status:        ${GREEN}${BOLD}ENABLED${NC}"
+    else
+        echo -e "  Status:        ${RED}${BOLD}DISABLED${NC}"
+    fi
+
+    local max_users recover_users min_nodes
+    max_users=$($YQ_BINARY -r '.load-balancing.max-users-per-node // 50' "$CONFIG_FILE" 2>/dev/null)
+    recover_users=$($YQ_BINARY -r '.load-balancing.recover-users-per-node // 30' "$CONFIG_FILE" 2>/dev/null)
+    min_nodes=$($YQ_BINARY -r '.load-balancing.min-active-nodes // 1' "$CONFIG_FILE" 2>/dev/null)
+
+    echo -e "  Max users:     ${CYAN}$max_users${NC}  ${DIM}(remove DNS above this)${NC}"
+    echo -e "  Recover users: ${CYAN}$recover_users${NC}  ${DIM}(re-add DNS below this)${NC}"
+    echo -e "  Min active:    ${CYAN}$min_nodes${NC}  ${DIM}(always keep this many nodes)${NC}"
+    echo ""
+
+    echo -e "${CYAN}Options:${NC}"
+    echo -e "  ${BOLD}1)${NC} Toggle ON/OFF"
+    echo -e "  ${BOLD}2)${NC} Set max users per node"
+    echo -e "  ${BOLD}3)${NC} Set recover users per node"
+    echo -e "  ${BOLD}4)${NC} Set min active nodes"
+    echo -e "  ${BOLD}5)${NC} Back"
+    read -rp "Choice [1-5]: " opt
+
+    case $opt in
+        1)
+            create_backup
+            if [[ "$lb_enabled" == "true" ]]; then
+                $YQ_BINARY -i '.load-balancing.enabled = false' "$CONFIG_FILE"
+                echo -e "${RED}⏸  Load balancing DISABLED${NC}"
+            else
+                # Ensure the section exists
+                $YQ_BINARY -i '.load-balancing.enabled = true' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.max-users-per-node //= 50' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.recover-users-per-node //= 30' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.min-active-nodes //= 1' "$CONFIG_FILE"
+                echo -e "${GREEN}▶  Load balancing ENABLED${NC}"
+            fi
+            ;;
+        2)
+            read -rp "Max users per node [$max_users]: " val
+            val=${val:-$max_users}
+            create_backup
+            $YQ_BINARY -i ".load-balancing.max-users-per-node = $val" "$CONFIG_FILE"
+            echo -e "${GREEN}✅ Max users set to $val${NC}"
+            ;;
+        3)
+            read -rp "Recover users per node [$recover_users]: " val
+            val=${val:-$recover_users}
+            create_backup
+            $YQ_BINARY -i ".load-balancing.recover-users-per-node = $val" "$CONFIG_FILE"
+            echo -e "${GREEN}✅ Recover users set to $val${NC}"
+            ;;
+        4)
+            read -rp "Min active nodes [$min_nodes]: " val
+            val=${val:-$min_nodes}
+            create_backup
+            $YQ_BINARY -i ".load-balancing.min-active-nodes = $val" "$CONFIG_FILE"
+            echo -e "${GREEN}✅ Min active nodes set to $val${NC}"
+            ;;
+        5) return ;;
+        *) echo -e "${RED}Invalid.${NC}" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────
 #  Main
 # ──────────────────────────────────────────────
 ensure_yq
@@ -724,10 +800,11 @@ while true; do
     echo -e "${BOLD}${BLUE}║${NC}  8.  Restart Service           ${BOLD}${BLUE}║${NC}"
     echo -e "${BOLD}${BLUE}║${NC}  9.  Backup Config             ${BOLD}${BLUE}║${NC}"
     echo -e "${BOLD}${BLUE}║${NC}  10. Restore Backup            ${BOLD}${BLUE}║${NC}"
+    echo -e "${BOLD}${BLUE}║${NC}  11. Load Balancing Settings    ${BOLD}${BLUE}║${NC}"
     echo -e "${BOLD}${BLUE}║${NC}  0.  Exit                      ${BOLD}${BLUE}║${NC}"
     echo -e "${BOLD}${BLUE}╚══════════════════════════════════╝${NC}"
     echo ""
-    read -rp "Enter choice [0-10]: " choice
+    read -rp "Enter choice [0-11]: " choice
 
     case $choice in
         1)  show_status;       pause ;;
@@ -740,6 +817,7 @@ while true; do
         8)  restart_service;   pause ;;
         9)  backup_config;     pause ;;
         10) restore_backup;    pause ;;
+        11) load_balancing;    pause ;;
         0)  echo -e "${GREEN}Goodbye!${NC}"; exit 0 ;;
         *)  echo -e "${RED}Invalid choice.${NC}"; pause ;;
     esac
