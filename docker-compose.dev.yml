@@ -1,0 +1,18 @@
+services:
+  remnawave-cloudflare-nodes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: remnawave-cloudflare-nodes-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src:ro
+      - ./config.yml:/app/config.yml:ro
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
