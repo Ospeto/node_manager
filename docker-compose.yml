@@ -1,6 +1,7 @@
 services:
   remnawave-cloudflare-nodes:
-    image: hteppl/remnawave-cloudflare-nodes:latest
+    build: .
+    image: remnawave-cloudflare-nodes:local
     container_name: remnawave-cloudflare-nodes
     restart: unless-stopped
     env_file:

@@ -636,8 +636,8 @@ restart_service() {
         echo -e "${RED}Docker not found.${NC}"
         return
     fi
-    echo -e "${YELLOW}Restarting...${NC}"
-    if docker compose -f "$SCRIPT_DIR/docker-compose.yml" restart; then
+    echo -e "${YELLOW}Rebuilding and restarting service...${NC}"
+    if docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --force-recreate; then
         echo -e "${GREEN}✅ Service restarted.${NC}"
     else
         echo -e "${RED}Failed. Check docker compose logs.${NC}"
