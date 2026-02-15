@@ -748,9 +748,9 @@ load_balancing() {
             else
                 # Ensure the section exists
                 $YQ_BINARY -i '.load-balancing.enabled = true' "$CONFIG_FILE"
-                $YQ_BINARY -i '.load-balancing.max-users-per-node //= 50' "$CONFIG_FILE"
-                $YQ_BINARY -i '.load-balancing.recover-users-per-node //= 30' "$CONFIG_FILE"
-                $YQ_BINARY -i '.load-balancing.min-active-nodes //= 1' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.max-users-per-node |= (. // 50)' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.recover-users-per-node |= (. // 30)' "$CONFIG_FILE"
+                $YQ_BINARY -i '.load-balancing.min-active-nodes |= (. // 1)' "$CONFIG_FILE"
                 echo -e "${GREEN}▶  Load balancing ENABLED${NC}"
             fi
             ;;

@@ -99,6 +99,9 @@ class MonitoringService:
                 users_by_ip[node.address] = node.users_online
                 node_by_ip[node.address] = node
 
+            if self.config.lb_enabled:
+                self.logger.info(f"[LB] users_by_ip: {users_by_ip}")
+
             await self._sync_all_zones(healthy_addresses, users_by_ip, node_by_ip)
 
             self.logger.info("Health check cycle completed")
@@ -180,9 +183,18 @@ class MonitoringService:
         min_active = self.config.lb_min_active_nodes
         full_domain = f"{zone_name}.{domain}"
 
+        self.logger.info(
+            f"[LB] {full_domain}: enabled=True, max={max_users}, recover={recover_users}, min_active={min_active}"
+        )
+
         # Only consider IPs that belong to this zone AND are healthy
         zone_healthy_ips = [ip for ip in configured_ips if ip in healthy_addresses]
         effective = set(healthy_addresses)  # Start with all healthy
+
+        self.logger.info(
+            f"[LB] {full_domain}: configured_ips={configured_ips}, "
+            f"zone_healthy_ips={zone_healthy_ips}, overloaded={self._overloaded_ips}"
+        )
 
         # Log capacity info for this zone
         capacity_info = []
@@ -193,7 +205,7 @@ class MonitoringService:
             else:
                 capacity_info.append(f"{ip} ({users} users ✓)")
         if capacity_info:
-            self.logger.info(f"{full_domain}: capacity: {', '.join(capacity_info)}")
+            self.logger.info(f"[LB] {full_domain}: capacity: {', '.join(capacity_info)}")
 
         # Phase 1: Check for nodes that should be THROTTLED (over max_users)
         for ip in zone_healthy_ips:
