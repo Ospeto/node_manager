@@ -175,7 +175,13 @@ class MonitoringService:
         Uses hysteresis: remove at max_users, re-add at recover_users.
         Enforces min_active_nodes per zone.
         """
+        full_domain = f"{zone_name}.{domain}"
+
         if not self.config.lb_enabled:
+            # Diagnostic: log once per minute or just verbose debug? 
+            # Let's log it as INFO so the user sees it immediately.
+            # We can remove this later.
+            self.logger.info(f"[LB] {full_domain}: LB is DISABLED in config")
             return healthy_addresses
 
         max_users = self.config.lb_max_users
