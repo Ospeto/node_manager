@@ -51,3 +51,64 @@ node-restored = <b>✅ Нода восстановлена</b>
     Пользователей: { $users } (порог: { $threshold })
 
     DNS запись восстановлена, трафик принимается.
+
+# Статус observer
+observer-stale = <b>⚠️ Observer устарел</b>
+    Скоуп: { $scope }
+    Observer: { $observer }
+    Детали: { $detail }
+
+observer-recovered = <b>✅ Observer восстановлен</b>
+    Скоуп: { $scope }
+    Observer: { $observer }
+
+observer-extended-stale = <b>🚨 Observer недоступен слишком долго</b>
+    Скоуп: { $scope }
+    Observer: { $observer }
+    Детали: { $detail }
+
+observer-mass-freeze = <b>🧊 Массовая деградация: freeze</b>
+    Скоуп: { $scope }
+    Observer: { $observer }
+    Детали: { $detail }
+
+observer-mass-freeze-cleared = <b>✅ Freeze снят</b>
+    Скоуп: { $scope }
+    Observer: { $observer }
+
+# Решения observer
+observer-drained = <b>🛑 Whitebox исключил ноду</b>
+    { $name } ({ $address }) удалена из { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+
+observer-restored = <b>✅ Whitebox восстановил ноду</b>
+    { $name } ({ $address }) может вернуться в { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+
+observer-blocked = <b>🟡 Исключение заблокировано</b>
+    { $name } ({ $address }) осталась в { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+    Детали: { $detail }
+
+observer-shadow-drained = <b>🌓 Кандидат на исключение (shadow)</b>
+    { $name } ({ $address }) была бы удалена из { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+
+observer-shadow-restored = <b>🌓 Кандидат на возврат (shadow)</b>
+    { $name } ({ $address }) вернулась бы в { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+
+observer-force-active = <b>🧰 Override force-active</b>
+    { $name } ({ $address }) оставлена активной для { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }
+
+observer-force-drained = <b>🧰 Override force-drained</b>
+    { $name } ({ $address }) принудительно удалена из { $domain }
+    Скоуп: { $scope }
+    Причины: { $reasons }

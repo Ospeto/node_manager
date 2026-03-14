@@ -56,3 +56,23 @@ class CapacityChange:
     action: str  # "throttled" or "restored"
     zone_name: str
     domain: str
+
+
+@dataclass
+class ObserverStatusChange:
+    scope: str
+    observer_id: str
+    status: str  # "stale" | "recovered" | "extended_stale" | "mass_freeze" | "mass_freeze_cleared"
+    detail: str = ""
+
+
+@dataclass
+class ObserverDecisionChange:
+    scope: str
+    zone_name: str
+    domain: str
+    ip_address: str
+    node_name: str
+    action: str  # drained | restored | blocked | shadow_drained | shadow_restored | force_active | force_drained
+    reasons: List[str]
+    detail: str = ""

@@ -3,7 +3,17 @@ from typing import Optional
 
 from fluent.runtime import FluentLocalization, FluentResourceLoader
 
-from .events import NodeStateChange, NodeStats, DNSChange, DNSError, CriticalState, HealthCheckError, CapacityChange
+from .events import (
+    CapacityChange,
+    CriticalState,
+    DNSChange,
+    DNSError,
+    HealthCheckError,
+    NodeStateChange,
+    NodeStats,
+    ObserverDecisionChange,
+    ObserverStatusChange,
+)
 from ..utils.logger import get_logger
 
 
@@ -94,5 +104,44 @@ class MessageFormatter:
                 "users": change.users_online,
                 "threshold": change.threshold,
                 "domain": f"{change.zone_name}.{change.domain}",
+            },
+        )
+
+    def format_observer_status_change(self, change: ObserverStatusChange) -> str:
+        message_id = {
+            "stale": "observer-stale",
+            "recovered": "observer-recovered",
+            "extended_stale": "observer-extended-stale",
+            "mass_freeze": "observer-mass-freeze",
+            "mass_freeze_cleared": "observer-mass-freeze-cleared",
+        }.get(change.status, "observer-stale")
+        return self._l10n.format_value(
+            message_id,
+            {
+                "scope": change.scope,
+                "observer": change.observer_id,
+                "detail": change.detail or "n/a",
+            },
+        )
+
+    def format_observer_decision_change(self, change: ObserverDecisionChange) -> str:
+        message_id = {
+            "drained": "observer-drained",
+            "restored": "observer-restored",
+            "blocked": "observer-blocked",
+            "shadow_drained": "observer-shadow-drained",
+            "shadow_restored": "observer-shadow-restored",
+            "force_active": "observer-force-active",
+            "force_drained": "observer-force-drained",
+        }.get(change.action, "observer-drained")
+        return self._l10n.format_value(
+            message_id,
+            {
+                "scope": change.scope,
+                "name": change.node_name,
+                "address": change.ip_address,
+                "domain": f"{change.zone_name}.{change.domain}",
+                "reasons": ", ".join(change.reasons) if change.reasons else "n/a",
+                "detail": change.detail or "n/a",
             },
         )

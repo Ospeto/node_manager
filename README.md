@@ -4,6 +4,13 @@
 
 ## remnawave-cloudflare-nodes
 
+For the Whitebox + Myanmar observer deployment in this repository, use the root README at [`../README.md`](../README.md). The root documentation covers:
+
+- local observer deployment
+- VPS controller deployment
+- Whitebox snapshot ingestion
+- Vercel frontend deployment
+
 <p align="left">
   <a href="https://github.com/hteppl/remnawave-cloudflare-nodes/releases/"><img src="https://img.shields.io/github/v/release/hteppl/remnawave-cloudflare-nodes.svg" alt="Release"></a>
   <a href="https://hub.docker.com/r/hteppl/remnawave-cloudflare-nodes/"><img src="https://img.shields.io/badge/DockerHub-remnawave--cloudflare--nodes-blue" alt="DockerHub"></a>

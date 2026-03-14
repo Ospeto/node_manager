@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 from dotenv import load_dotenv
@@ -147,6 +147,59 @@ class Config:
     def lb_min_active_nodes(self) -> int:
         return self.get("load-balancing.min-active-nodes", 1)
 
+    @property
+    def observer_enabled(self) -> bool:
+        return self.get("observer.enabled", False)
+
+    @property
+    def observer_shadow_mode(self) -> bool:
+        return self.get("observer.shadow-mode", True)
+
+    @property
+    def observer_listen_host(self) -> str:
+        return self.get("observer.listen-host", "0.0.0.0")
+
+    @property
+    def observer_listen_port(self) -> int:
+        return int(self.get("observer.listen-port", 9580))
+
+    @property
+    def observer_shared_secret(self) -> str:
+        configured = self.get("observer.shared-secret", "")
+        return configured or os.getenv("OBSERVER_SHARED_SECRET", "")
+
+    @property
+    def observer_allowed_ids(self) -> List[str]:
+        return self.get("observer.allowed-observer-ids", [])
+
+    @property
+    def observer_freshness_ttl_seconds(self) -> int:
+        return int(self.get("observer.freshness-ttl-seconds", 120))
+
+    @property
+    def observer_extended_stale_threshold_seconds(self) -> int:
+        return int(self.get("observer.extended-stale-threshold-seconds", 1800))
+
+    @property
+    def observer_mass_degradation_threshold_ratio(self) -> float:
+        return float(self.get("observer.mass-degradation-threshold-ratio", 0.5))
+
+    @property
+    def observer_state_file(self) -> str:
+        return self.get("observer.state-file", "data/observer-state.json")
+
+    @property
+    def observer_force_active_ips(self) -> List[str]:
+        return self.get("observer.force-active-ips", [])
+
+    @property
+    def observer_force_drained_ips(self) -> List[str]:
+        return self.get("observer.force-drained-ips", [])
+
+    @property
+    def observer_status_allow_origin(self) -> str:
+        return self.get("observer.status-allow-origin", "*")
+
     def get_all_zones(self) -> list:
         zones = []
         for domain_config in self.domains:
@@ -158,6 +211,7 @@ class Config:
                     "ttl": zone.get("ttl", 120),
                     "proxied": zone.get("proxied", False),
                     "ips": zone.get("ips", []),
+                    "observer_scope": zone.get("observer-scope"),
                 }
                 zones.append(zone_data)
         return zones

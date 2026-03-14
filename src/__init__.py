@@ -1,14 +1,22 @@
 from .config import Config
-from .remnawave import RemnawaveClient, NodeMonitor, NodeStatus
-from .cloudflare_dns import CloudflareClient, DNSManager
-from .monitoring_service import MonitoringService
 
-__all__ = [
-    "Config",
-    "RemnawaveClient",
-    "NodeMonitor",
-    "NodeStatus",
-    "CloudflareClient",
-    "DNSManager",
-    "MonitoringService",
-]
+__all__ = ["Config"]
+
+try:
+    from .cloudflare_dns import CloudflareClient, DNSManager
+    from .monitoring_service import MonitoringService
+    from .remnawave import NodeMonitor, NodeStatus, RemnawaveClient
+
+    __all__.extend(
+        [
+            "RemnawaveClient",
+            "NodeMonitor",
+            "NodeStatus",
+            "CloudflareClient",
+            "DNSManager",
+            "MonitoringService",
+        ]
+    )
+except ModuleNotFoundError:
+    # Optional runtime dependencies are not required for lightweight unit tests.
+    pass

@@ -51,3 +51,64 @@ node-restored = <b>✅ Node Restored</b>
     Users: { $users } (threshold: { $threshold })
 
     DNS record restored, accepting traffic again.
+
+# Observer status
+observer-stale = <b>⚠️ Observer Stale</b>
+    Scope: { $scope }
+    Observer: { $observer }
+    Detail: { $detail }
+
+observer-recovered = <b>✅ Observer Recovered</b>
+    Scope: { $scope }
+    Observer: { $observer }
+
+observer-extended-stale = <b>🚨 Observer Offline Too Long</b>
+    Scope: { $scope }
+    Observer: { $observer }
+    Detail: { $detail }
+
+observer-mass-freeze = <b>🧊 Mass Degradation Freeze</b>
+    Scope: { $scope }
+    Observer: { $observer }
+    Detail: { $detail }
+
+observer-mass-freeze-cleared = <b>✅ Mass Freeze Cleared</b>
+    Scope: { $scope }
+    Observer: { $observer }
+
+# Observer decisions
+observer-drained = <b>🛑 Whitebox Drained</b>
+    { $name } ({ $address }) removed from { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+
+observer-restored = <b>✅ Whitebox Restored</b>
+    { $name } ({ $address }) can return to { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+
+observer-blocked = <b>🟡 Whitebox Drain Blocked</b>
+    { $name } ({ $address }) stayed in { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+    Detail: { $detail }
+
+observer-shadow-drained = <b>🌓 Shadow Drain Candidate</b>
+    { $name } ({ $address }) would be removed from { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+
+observer-shadow-restored = <b>🌓 Shadow Restore Candidate</b>
+    { $name } ({ $address }) would return to { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+
+observer-force-active = <b>🧰 Force Active Override</b>
+    { $name } ({ $address }) stayed active for { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }
+
+observer-force-drained = <b>🧰 Force Drained Override</b>
+    { $name } ({ $address }) was operator-drained for { $domain }
+    Scope: { $scope }
+    Reasons: { $reasons }

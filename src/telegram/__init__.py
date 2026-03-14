@@ -1,12 +1,14 @@
 from .notifier import TelegramNotifier
 from .events import (
-    NodeStats,
-    NodeStateChange,
+    CapacityChange,
+    CriticalState,
     DNSChange,
     DNSError,
-    CriticalState,
     HealthCheckError,
-    CapacityChange,
+    NodeStateChange,
+    NodeStats,
+    ObserverDecisionChange,
+    ObserverStatusChange,
 )
 from .formatter import MessageFormatter
 
@@ -19,5 +21,7 @@ __all__ = [
     "CriticalState",
     "HealthCheckError",
     "CapacityChange",
+    "ObserverStatusChange",
+    "ObserverDecisionChange",
     "MessageFormatter",
 ]

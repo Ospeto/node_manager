@@ -6,9 +6,17 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    ports:
+      - "9580:9580"
     volumes:
       - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
       - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9580/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging:
       driver: json-file
       options:

@@ -6,6 +6,7 @@ from .config import Config
 from .remnawave import RemnawaveClient, NodeMonitor
 from .cloudflare_dns import CloudflareClient, DNSManager
 from .monitoring_service import MonitoringService
+from .observer import ObserverController, ObserverServer
 from .telegram import TelegramNotifier
 from .utils.logger import setup_logger
 
@@ -42,6 +43,8 @@ async def run_monitoring_loop(service: MonitoringService, interval: int, logger)
 
 async def main():
     config = Config()
+    observer_controller = ObserverController(config)
+    observer_server = None
 
     logger = setup_logger(name="remnawave-cloudflare-monitor", level=config.log_level, log_file="logs/app.log")
 
@@ -77,11 +80,21 @@ async def main():
         cloudflare_client=cloudflare_client,
         dns_manager=dns_manager,
         notifier=notifier,
+        observer_controller=observer_controller,
     )
 
     try:
         await notifier.start()
         notifier.notify_service_started()
+
+        if config.observer_enabled:
+            observer_server = ObserverServer(
+                host=config.observer_listen_host,
+                port=config.observer_listen_port,
+                controller=observer_controller,
+                allow_origin=config.observer_status_allow_origin,
+            )
+            observer_server.start()
 
         await monitoring_service.initialize_and_print_zones()
 
@@ -92,6 +105,8 @@ async def main():
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
+        if observer_server:
+            observer_server.stop()
         notifier.notify_service_stopped()
         await notifier.stop()
 

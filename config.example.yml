@@ -9,6 +9,7 @@ domains:
       - name: s1          # Creates s1.example1.com
         ttl: 60           # Record TTL in seconds
         proxied: false    # Cloudflare proxy (orange cloud)
+        observer-scope: mm
         ips:              # Node IPs to monitor
           - 1.2.3.4
           - 5.6.7.8
@@ -18,6 +19,7 @@ domains:
       - name: s2
         ttl: 60
         proxied: false
+        observer-scope: mm
         ips:
           - 13.14.15.16
           - 17.18.19.20
@@ -27,6 +29,22 @@ load-balancing:
   max-users-per-node: 50       # Remove DNS record when node exceeds this user count
   recover-users-per-node: 30   # Re-add DNS record when node drops below this count
   min-active-nodes: 1          # Always keep at least N nodes active per zone
+
+observer:
+  enabled: true
+  shadow-mode: true                  # Start in shadow mode, then switch to false after validation
+  listen-host: 0.0.0.0
+  listen-port: 9580
+  shared-secret: ${OBSERVER_SHARED_SECRET}
+  allowed-observer-ids:
+    - myanmar-observer
+  freshness-ttl-seconds: 120
+  extended-stale-threshold-seconds: 1800
+  mass-degradation-threshold-ratio: 0.5
+  state-file: data/observer-state.json
+  status-allow-origin: "*"
+  force-active-ips: []
+  force-drained-ips: []
 
 logging:
   level: INFO # DEBUG, INFO, WARNING, ERROR, CRITICAL
